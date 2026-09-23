@@ -146,10 +146,26 @@ app.get('/test/freshsales-lookup', async (req, res) => {
 
     const detailedContact = detailData?.contact;
     if (!detailedContact || String(detailedContact.id) !== String(contactId)) {
-      return res.status(502).json({ ok: false, stage: 'contact_deals', error: 'Unexpected Freshsales contact response shape' });
+      return res.status(502).json({
+        ok: false, stage: 'contact_deals', error: 'Unexpected Freshsales contact response shape',
+        lookup_contact: { id: contactId, email: contact.email, name: contact.display_name },
+        response_shape: {
+          top_level_keys: detailData && typeof detailData === 'object' ? Object.keys(detailData) : [],
+          contact_keys: detailedContact && typeof detailedContact === 'object' ? Object.keys(detailedContact) : []
+        }
+      });
     }
     if (!Array.isArray(detailedContact.deals)) {
-      return res.status(502).json({ ok: false, stage: 'contact_deals', error: 'Freshsales did not return connected deals' });
+      return res.status(502).json({
+        ok: false, stage: 'contact_deals', error: 'Freshsales did not return connected deals',
+        lookup_contact: { id: detailedContact.id, email: detailedContact.email, name: detailedContact.display_name },
+        response_shape: {
+          top_level_keys: Object.keys(detailData),
+          contact_keys: Object.keys(detailedContact),
+          top_level_deals_type: Array.isArray(detailData?.deals) ? 'array' : typeof detailData?.deals,
+          nested_deals_type: typeof detailedContact.deals
+        }
+      });
     }
     const deals = detailedContact.deals;
 
@@ -200,6 +216,7 @@ app.listen(PORT, async () => {
         status: result.status || result.stage || (result.ok ? 'SUCCESS' : 'ERROR'),
         freshsales_status: result.freshsales_status,
         response_shape: result.response_shape,
+        lookup_contact: result.lookup_contact,
         contact: result.contact,
         deal_count: result.deal_count,
         deals: Array.isArray(result.deals) ? result.deals.map((deal) => ({
