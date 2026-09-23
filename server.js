@@ -80,7 +80,16 @@ app.get('/test/freshsales-lookup', async (req, res) => {
     // Freshsales lookup returns { contacts: { contacts: [...] } }.
     const foundContacts = lookupData?.contacts?.contacts;
     if (!Array.isArray(foundContacts)) {
-      return res.status(502).json({ ok: false, stage: 'contact_lookup', error: 'Unexpected Freshsales lookup response shape' });
+      return res.status(502).json({
+        ok: false,
+        stage: 'contact_lookup',
+        error: 'Unexpected Freshsales lookup response shape',
+        response_shape: {
+          top_level_keys: lookupData && typeof lookupData === 'object' ? Object.keys(lookupData) : [],
+          contacts_type: Array.isArray(lookupData?.contacts) ? 'array' : typeof lookupData?.contacts,
+          contacts_keys: lookupData?.contacts && !Array.isArray(lookupData.contacts) && typeof lookupData.contacts === 'object' ? Object.keys(lookupData.contacts) : []
+        }
+      });
     }
     const exactContacts = foundContacts.filter(
       (record) => String(record?.email || '').trim().toLowerCase() === email
@@ -181,6 +190,7 @@ app.listen(PORT, async () => {
         http_status: response.status,
         status: result.status || result.stage || (result.ok ? 'SUCCESS' : 'ERROR'),
         freshsales_status: result.freshsales_status,
+        response_shape: result.response_shape,
         contact: result.contact,
         deal_count: result.deal_count,
         deals: Array.isArray(result.deals) ? result.deals.map((deal) => ({
