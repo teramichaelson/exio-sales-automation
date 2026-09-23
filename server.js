@@ -87,7 +87,12 @@ app.get('/test/freshsales-lookup', async (req, res) => {
         response_shape: {
           top_level_keys: lookupData && typeof lookupData === 'object' ? Object.keys(lookupData) : [],
           contacts_type: Array.isArray(lookupData?.contacts) ? 'array' : typeof lookupData?.contacts,
-          contacts_keys: lookupData?.contacts && !Array.isArray(lookupData.contacts) && typeof lookupData.contacts === 'object' ? Object.keys(lookupData.contacts) : []
+          contacts_keys: lookupData?.contacts && !Array.isArray(lookupData.contacts) && typeof lookupData.contacts === 'object' ? Object.keys(lookupData.contacts) : [],
+          upstream_http_status: lookupResponse.status,
+          upstream_content_type: lookupResponse.headers.get('content-type'),
+          upstream_redirected: lookupResponse.redirected,
+          upstream_response_is_html: typeof lookupData === 'string' && /^\s*</.test(lookupData),
+          configured_base_has_crm_sales_path: new URL(base).pathname.replace(/\/$/, '').endsWith('/crm/sales')
         }
       });
     }
