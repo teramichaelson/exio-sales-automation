@@ -155,7 +155,7 @@ app.get('/test/freshsales-lookup', async (req, res) => {
         }
       });
     }
-    if (!Array.isArray(detailedContact.deals)) {
+    if (!Array.isArray(detailData.deals)) {
       return res.status(502).json({
         ok: false, stage: 'contact_deals', error: 'Freshsales did not return connected deals',
         lookup_contact: { id: detailedContact.id, email: detailedContact.email, name: detailedContact.display_name },
@@ -167,7 +167,11 @@ app.get('/test/freshsales-lookup', async (req, res) => {
         }
       });
     }
-    const deals = detailedContact.deals;
+    const deals = detailData.deals;
+    if (Array.isArray(detailedContact.deal_ids) &&
+        deals.some((deal) => !detailedContact.deal_ids.map(String).includes(String(deal.id)))) {
+      return res.status(502).json({ ok: false, stage: 'contact_deals', error: 'Connected deal IDs do not match contact' });
+    }
 
     const result = {
       ok: deals.length === 1,
