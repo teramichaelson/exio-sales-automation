@@ -257,4 +257,31 @@ app.listen(PORT, async () => {
       console.error('Read-only Freshsales diagnostic failed:', error.message);
     }
   }
+  if (process.env.TEST_LIST_STAGES === 'true') {
+    try {
+      const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
+      const pipelinesResponse = await fetch(`${base}/api/selector/deal_pipelines`, { headers: freshsalesHeaders() });
+      const pipelinesData = await pipelinesResponse.json();
+      const pipelines = Array.isArray(pipelinesData?.deal_pipelines) ? pipelinesData.deal_pipelines : [];
+      console.log('Read-only deal pipeline diagnostic', JSON.stringify({
+        http_status: pipelinesResponse.status,
+        response_keys: Object.keys(pipelinesData),
+        pipelines: pipelines.map(item => ({ id: item.id, name: item.name }))
+      }));
+      for (const pipeline of pipelines) {
+        const stagesResponse = await fetch(`${base}/api/selector/deal_pipelines/${encodeURIComponent(pipeline.id)}/deal_stages`, { headers: freshsalesHeaders() });
+        const stagesData = await stagesResponse.json();
+        console.log('Read-only stage list diagnostic', JSON.stringify({
+          pipeline_id: pipeline.id,
+          http_status: stagesResponse.status,
+          response_keys: Object.keys(stagesData),
+          stages: Array.isArray(stagesData?.deal_stages) ? stagesData.deal_stages.map(item => ({
+            id: item.id, name: item.name, deal_pipeline_id: item.deal_pipeline_id
+          })) : undefined
+        }));
+      }
+    } catch (error) {
+      console.error('Read-only stage list diagnostic failed:', error.message);
+    }
+  }
 });
