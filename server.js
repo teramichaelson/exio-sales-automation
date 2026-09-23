@@ -227,6 +227,25 @@ app.listen(PORT, async () => {
           id: deal.id, name: deal.name, deal_stage_id: deal.deal_stage_id, status: deal.status
         })) : undefined
       }));
+      if (result.deal_count === 1 && result.deals?.[0]?.id) {
+        const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
+        const dealResponse = await fetch(`${base}/api/deals/${encodeURIComponent(result.deals[0].id)}?include=deal_stage`, {
+          headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000)
+        });
+        const dealData = await dealResponse.json();
+        console.log('Read-only deal-stage diagnostic', JSON.stringify({
+          http_status: dealResponse.status,
+          top_level_keys: Object.keys(dealData),
+          deal_id: dealData?.deal?.id,
+          deal_stage_id: dealData?.deal?.deal_stage_id,
+          nested_deal_stage: dealData?.deal?.deal_stage ? {
+            id: dealData.deal.deal_stage.id, name: dealData.deal.deal_stage.name
+          } : undefined,
+          stage_list: Array.isArray(dealData?.deal_stages) ? dealData.deal_stages.map(stage => ({
+            id: stage.id, name: stage.name
+          })) : undefined
+        }));
+      }
     } catch (error) {
       console.error('Read-only Freshsales diagnostic failed:', error.message);
     }
