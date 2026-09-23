@@ -174,7 +174,7 @@ app.get('/test/freshsales-lookup', async (req, res) => {
     }
 
     const result = {
-      ok: deals.length === 1,
+      ok: false,
       mode: 'read-only',
       email,
       contact: {
@@ -194,9 +194,34 @@ app.get('/test/freshsales-lookup', async (req, res) => {
       });
     }
 
+    const dealResponse = await fetch(`${base}/api/deals/${encodeURIComponent(deals[0].id)}?include=deal_stage`, {
+      headers: freshsalesHeaders()
+    });
+    if (!dealResponse.ok) {
+      return res.status(502).json({ ...result, stage: 'deal_stage', freshsales_status: dealResponse.status });
+    }
+    const dealData = await dealResponse.json();
+    if (String(dealData?.deal?.id) !== String(deals[0].id)) {
+      return res.status(502).json({ ...result, stage: 'deal_stage', error: 'Deal detail ID mismatch' });
+    }
+    const stageId = dealData.deal.deal_stage_id;
+    const stage = Array.isArray(dealData.deal_stages)
+      ? dealData.deal_stages.find(item => String(item.id) === String(stageId))
+      : null;
+    result.deal_stage = { id: stageId, name: stage?.name || null };
+    const allowedStageIds = String(process.env.OPEN_DEAL_STAGE_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+    if (!stage || !allowedStageIds.includes(String(stageId))) {
+      return res.status(409).json({
+        ...result,
+        status: 'DEAL_STAGE_REVIEW',
+        next_step: 'Confirm this stage is open before selecting the deal. Set OPEN_DEAL_STAGE_IDS only after Exio approves the stage mapping.'
+      });
+    }
+
     return res.json({
       ...result,
-      next_step: 'Verify the deal is open and matches the meeting before any CRM write action.'
+      ok: true,
+      next_step: 'Match this deal to the meeting before any CRM write action.'
     });
   } catch (error) {
     console.error(error);
@@ -221,31 +246,13 @@ app.listen(PORT, async () => {
         freshsales_status: result.freshsales_status,
         response_shape: result.response_shape,
         lookup_contact: result.lookup_contact,
+        deal_stage: result.deal_stage,
         contact: result.contact,
         deal_count: result.deal_count,
         deals: Array.isArray(result.deals) ? result.deals.map((deal) => ({
           id: deal.id, name: deal.name, deal_stage_id: deal.deal_stage_id, status: deal.status
         })) : undefined
       }));
-      if (result.deal_count === 1 && result.deals?.[0]?.id) {
-        const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
-        const dealResponse = await fetch(`${base}/api/deals/${encodeURIComponent(result.deals[0].id)}?include=deal_stage`, {
-          headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000)
-        });
-        const dealData = await dealResponse.json();
-        console.log('Read-only deal-stage diagnostic', JSON.stringify({
-          http_status: dealResponse.status,
-          top_level_keys: Object.keys(dealData),
-          deal_id: dealData?.deal?.id,
-          deal_stage_id: dealData?.deal?.deal_stage_id,
-          nested_deal_stage: dealData?.deal?.deal_stage ? {
-            id: dealData.deal.deal_stage.id, name: dealData.deal.deal_stage.name
-          } : undefined,
-          stage_list: Array.isArray(dealData?.deal_stages) ? dealData.deal_stages.map(stage => ({
-            id: stage.id, name: stage.name
-          })) : undefined
-        }));
-      }
     } catch (error) {
       console.error('Read-only Freshsales diagnostic failed:', error.message);
     }
