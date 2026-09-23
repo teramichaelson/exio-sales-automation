@@ -25,7 +25,11 @@ function freshsalesHeaders() {
 }
 
 function normalizeBaseUrl(value) {
-  return value.replace(/\/$/, '');
+  const url = new URL(value);
+  const path = url.pathname.replace(/\/$/, '');
+  if (!path) return `${url.origin}/crm/sales`;
+  if (path === '/crm/sales') return `${url.origin}${path}`;
+  throw new Error('FRESHSALES_BASE_URL must be the site root or end in /crm/sales');
 }
 
 app.get('/health', (_req, res) => {
