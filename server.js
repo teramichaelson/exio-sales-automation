@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 3000;
 const FRESHSALES_BASE_URL = process.env.FRESHSALES_BASE_URL;
 const FRESHSALES_API_KEY = process.env.FRESHSALES_API_KEY;
 const TEST_TOKEN = process.env.TEST_TOKEN;
+const TEST_LOOKUP_EMAIL = process.env.TEST_LOOKUP_EMAIL;
 
 function requireConfig() {
   const missing = [];
@@ -76,9 +77,14 @@ app.get('/test/freshsales-lookup', async (req, res) => {
       });
     }
 
-    const exactContacts = Array.isArray(lookupData)
-      ? lookupData.filter((record) => record?.type === 'contact' && String(record?.email || '').toLowerCase() === email)
-      : [];
+    // Freshsales lookup returns { contacts: { contacts: [...] } }.
+    const foundContacts = lookupData?.contacts?.contacts;
+    if (!Array.isArray(foundContacts)) {
+      return res.status(502).json({ ok: false, stage: 'contact_lookup', error: 'Unexpected Freshsales lookup response shape' });
+    }
+    const exactContacts = foundContacts.filter(
+      (record) => String(record?.email || '').trim().toLowerCase() === email
+    );
 
     if (exactContacts.length === 0) {
       return res.status(404).json({
@@ -120,20 +126,39 @@ app.get('/test/freshsales-lookup', async (req, res) => {
       });
     }
 
-    const deals = Array.isArray(detailData?.deals) ? detailData.deals : [];
+    const detailedContact = detailData?.contact;
+    if (!detailedContact || String(detailedContact.id) !== String(contactId)) {
+      return res.status(502).json({ ok: false, stage: 'contact_deals', error: 'Unexpected Freshsales contact response shape' });
+    }
+    if (!Array.isArray(detailedContact.deals)) {
+      return res.status(502).json({ ok: false, stage: 'contact_deals', error: 'Freshsales did not return connected deals' });
+    }
+    const deals = detailedContact.deals;
 
-    return res.json({
-      ok: true,
+    const result = {
+      ok: deals.length === 1,
       mode: 'read-only',
       email,
       contact: {
-        id: contact.id,
-        name: contact.name,
-        email: contact.email
+        id: detailedContact.id,
+        name: detailedContact.display_name || [detailedContact.first_name, detailedContact.last_name].filter(Boolean).join(' '),
+        email: detailedContact.email
       },
       deals,
-      deal_count: deals.length,
-      next_step: 'Review deal data and define deterministic open-deal selection rule before any CRM write actions are enabled.'
+      deal_count: deals.length
+    };
+
+    if (deals.length !== 1) {
+      return res.status(deals.length ? 409 : 404).json({
+        ...result,
+        status: deals.length ? 'MULTIPLE_DEALS_REVIEW' : 'NO_ASSOCIATED_DEAL',
+        next_step: 'Human review required before choosing any deal.'
+      });
+    }
+
+    return res.json({
+      ...result,
+      next_step: 'Verify the deal is open and matches the meeting before any CRM write action.'
     });
   } catch (error) {
     console.error(error);
@@ -141,6 +166,29 @@ app.get('/test/freshsales-lookup', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Exio Sales Automation listening on port ${PORT}`);
+  // Temporary, opt-in read-only check. The token is used inside the container and never logged.
+  if (TEST_LOOKUP_EMAIL) {
+    try {
+      const url = `http://127.0.0.1:${PORT}/test/freshsales-lookup?email=${encodeURIComponent(TEST_LOOKUP_EMAIL)}`;
+      const response = await fetch(url, {
+        headers: { 'x-test-token': TEST_TOKEN || '' },
+        signal: AbortSignal.timeout(20000)
+      });
+      const result = await response.json();
+      console.log('Read-only Freshsales diagnostic', JSON.stringify({
+        http_status: response.status,
+        status: result.status || result.stage || (result.ok ? 'SUCCESS' : 'ERROR'),
+        freshsales_status: result.freshsales_status,
+        contact: result.contact,
+        deal_count: result.deal_count,
+        deals: Array.isArray(result.deals) ? result.deals.map((deal) => ({
+          id: deal.id, name: deal.name, deal_stage_id: deal.deal_stage_id, status: deal.status
+        })) : undefined
+      }));
+    } catch (error) {
+      console.error('Read-only Freshsales diagnostic failed:', error.message);
+    }
+  }
 });
