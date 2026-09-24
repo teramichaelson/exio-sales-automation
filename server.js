@@ -231,8 +231,72 @@ app.get('/test/freshsales-lookup', async (req, res) => {
   }
 });
 
+async function runContactEmailMaintenance() {
+  const id = process.env.CONTACT_EMAIL_UPDATE_ID;
+  if (!id) return;
+  const expectedName = process.env.CONTACT_EMAIL_UPDATE_NAME;
+  const primary = process.env.CONTACT_EMAIL_UPDATE_PRIMARY?.trim().toLowerCase();
+  const secondary = process.env.CONTACT_EMAIL_UPDATE_SECONDARY?.trim().toLowerCase();
+  if (!/^\\d+$/.test(id) || !expectedName || !primary || !secondary || primary === secondary) {
+    console.error('Contact email maintenance: invalid configuration');
+    return;
+  }
+  try {
+    const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
+    const url = `${base}/api/contacts/${encodeURIComponent(id)}`;
+    const beforeResponse = await fetch(url, { headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000) });
+    if (!beforeResponse.ok) throw new Error(`Contact read failed: ${beforeResponse.status}`);
+    const before = (await beforeResponse.json()).contact;
+    const emails = before?.emails;
+    if (String(before?.id) !== id || before?.display_name !== expectedName ||
+        String(before?.email || '').toLowerCase() !== primary ||
+        !Array.isArray(emails) || !emails.some(item => item.is_primary && String(item.value).toLowerCase() === primary)) {
+      console.error('Contact email maintenance: identity or primary email check failed');
+      return;
+    }
+    const values = emails.map(item => String(item.value || '').trim().toLowerCase());
+    if (values.includes(secondary)) {
+      console.log('Contact email maintenance: both addresses already present', JSON.stringify({ id, emails: values }));
+      return;
+    }
+    if (process.env.CONTACT_EMAIL_UPDATE_EXECUTE !== 'true') {
+      console.log('Contact email maintenance dry run', JSON.stringify({ id, existing_emails: values, proposed_secondary: secondary }));
+      return;
+    }
+    const updatedEmails = emails.map(item => ({
+      id: item.id, value: item.value, is_primary: item.is_primary
+    }));
+    updatedEmails.push({ value: secondary, is_primary: false });
+    const updateResponse = await fetch(url, {
+      method: 'PUT',
+      headers: freshsalesHeaders(),
+      body: JSON.stringify({ contact: { emails: updatedEmails } }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!updateResponse.ok) {
+      console.error('Contact email maintenance: update rejected', JSON.stringify({ http_status: updateResponse.status }));
+      return;
+    }
+    const verifyResponse = await fetch(url, { headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000) });
+    if (!verifyResponse.ok) throw new Error(`Verification read failed: ${verifyResponse.status}`);
+    const after = (await verifyResponse.json()).contact;
+    const afterEmails = Array.isArray(after?.emails) ? after.emails.map(item => ({
+      value: String(item.value || '').trim().toLowerCase(), is_primary: item.is_primary
+    })) : [];
+    console.log('Contact email maintenance result', JSON.stringify({
+      id, verified: String(after?.id) === id &&
+        afterEmails.some(item => item.value === primary && item.is_primary) &&
+        afterEmails.some(item => item.value === secondary && !item.is_primary),
+      emails: afterEmails
+    }));
+  } catch (error) {
+    console.error('Contact email maintenance failed:', error.message);
+  }
+}
+
 app.listen(PORT, async () => {
   console.log(`Exio Sales Automation listening on port ${PORT}`);
+  await runContactEmailMaintenance();
   // Temporary, opt-in read-only check. The token is used inside the container and never logged.
   if (TEST_LOOKUP_EMAIL) {
     try {
