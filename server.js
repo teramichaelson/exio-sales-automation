@@ -209,19 +209,21 @@ app.get('/test/freshsales-lookup', async (req, res) => {
       ? dealData.deal_stages.find(item => String(item.id) === String(stageId))
       : null;
     result.deal_stage = { id: stageId, name: stage?.name || null };
-    const allowedStageIds = String(process.env.OPEN_DEAL_STAGE_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
-    if (!stage || !allowedStageIds.includes(String(stageId))) {
+    result.deal_pipeline_id = dealData.deal.deal_pipeline_id;
+    if (String(result.deal_pipeline_id) !== '3000017890') {
       return res.status(409).json({
         ...result,
-        status: 'DEAL_STAGE_REVIEW',
-        next_step: 'Confirm this stage is open before selecting the deal. Set OPEN_DEAL_STAGE_IDS only after Exio approves the stage mapping.'
+        status: 'PIPELINE_REVIEW',
+        next_step: 'Human review required: this deal is not in the Exio Sellers pipeline.'
       });
     }
 
     return res.json({
       ...result,
       ok: true,
-      next_step: 'Match this deal to the meeting before any CRM write action.'
+      deal_match_status: 'SINGLE_EXIO_SELLERS_DEAL',
+      report_status: 'AWAITING_COMPLETED_ZOOM',
+      next_step: 'Correlate a completed Zoom meeting to this contact and deal before drafting a report or writing to Freshsales.'
     });
   } catch (error) {
     console.error(error);
@@ -247,6 +249,9 @@ app.listen(PORT, async () => {
         response_shape: result.response_shape,
         lookup_contact: result.lookup_contact,
         deal_stage: result.deal_stage,
+        deal_pipeline_id: result.deal_pipeline_id,
+        deal_match_status: result.deal_match_status,
+        report_status: result.report_status,
         contact: result.contact,
         deal_count: result.deal_count,
         deals: Array.isArray(result.deals) ? result.deals.map((deal) => ({
