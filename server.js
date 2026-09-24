@@ -100,9 +100,49 @@ app.get('/test/freshsales-lookup', async (req, res) => {
         }
       });
     }
-    const exactContacts = foundContacts.filter(
+    let exactContacts = foundContacts.filter(
       (record) => String(record?.email || '').trim().toLowerCase() === email
     );
+
+    // The lookup response may show only the primary email. Verify secondary
+    // email matches against the full contact before accepting the candidate.
+    if (exactContacts.length === 0) {
+      const filteredResponse = await fetch(`${base}/api/filtered_search/contact`, {
+        method: 'POST',
+        headers: freshsalesHeaders(),
+        body: JSON.stringify({
+          filter_rule: [{ attribute: 'contact_email.email', operator: 'is_in', value: email }]
+        })
+      });
+      if (!filteredResponse.ok) {
+        return res.status(502).json({
+          ok: false, stage: 'secondary_email_search', freshsales_status: filteredResponse.status
+        });
+      }
+      const filteredData = await filteredResponse.json();
+      if (!Array.isArray(filteredData?.contacts) || Number(filteredData?.meta?.total) > filteredData.contacts.length) {
+        return res.status(502).json({ ok: false, stage: 'secondary_email_search', error: 'Incomplete contact search' });
+      }
+      const verified = [];
+      for (const candidate of filteredData.contacts) {
+        const candidateResponse = await fetch(
+          `${base}/api/contacts/${encodeURIComponent(candidate.id)}`,
+          { headers: freshsalesHeaders() }
+        );
+        if (!candidateResponse.ok) {
+          return res.status(502).json({
+            ok: false, stage: 'secondary_email_verification', freshsales_status: candidateResponse.status
+          });
+        }
+        const fullContact = (await candidateResponse.json()).contact;
+        if (String(fullContact?.id) === String(candidate.id) &&
+            Array.isArray(fullContact.emails) &&
+            fullContact.emails.some(item => String(item.value || '').trim().toLowerCase() === email)) {
+          verified.push(fullContact);
+        }
+      }
+      exactContacts = verified;
+    }
 
     if (exactContacts.length === 0) {
       return res.status(404).json({
