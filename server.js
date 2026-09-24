@@ -289,11 +289,39 @@ app.listen(PORT, async () => {
       console.error('Read-only stage list diagnostic failed:', error.message);
     }
   }
+  if (process.env.TEST_FILTER_EMAIL) {
+    try {
+      const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
+      const response = await fetch(`${base}/api/filtered_search/contact`, {
+        method: 'POST',
+        headers: freshsalesHeaders(),
+        body: JSON.stringify({
+          filter_rule: [{
+            attribute: 'contact_email.email',
+            operator: 'is_in',
+            value: process.env.TEST_FILTER_EMAIL.trim().toLowerCase()
+          }]
+        }),
+        signal: AbortSignal.timeout(20000)
+      });
+      const data = await response.json();
+      console.log('Read-only exact email diagnostic', JSON.stringify({
+        http_status: response.status,
+        total: data?.meta?.total,
+        contacts: Array.isArray(data?.contacts) ? data.contacts.map(item => ({
+          id: item.id, name: item.display_name, email: item.email
+        })) : undefined,
+        response_keys: data && typeof data === 'object' ? Object.keys(data) : []
+      }));
+    } catch (error) {
+      console.error('Read-only exact email diagnostic failed:', error.message);
+    }
+  }
   if (process.env.TEST_SEARCH_QUERY) {
     try {
       const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
       for (const query of process.env.TEST_SEARCH_QUERY.split(',').map(value => value.trim()).filter(Boolean)) {
-        const url = `${base}/api/search?q=${encodeURIComponent(query)}&include=contact,deal&per_page=100`;
+        const url = `${base}/api/search?q=${encodeURIComponent(query)}&include=lead,contact,deal&per_page=100`;
         const response = await fetch(url, { headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000) });
         const results = await response.json();
         console.log('Read-only Freshsales search diagnostic', JSON.stringify({
