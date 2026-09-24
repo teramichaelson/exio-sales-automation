@@ -8,8 +8,8 @@ Updated: 2026-09-24 UTC
 - Read-only Freshsales lookup returns an exact contact, associated deal IDs, deal stage, and pipeline. Multiple contacts or deals stop for human review. A deal outside Exio Sellers stops for review.
 - The Exio Sellers match was verified live with a known record. The response is `SINGLE_EXIO_SELLERS_DEAL` with `AWAITING_COMPLETED_ZOOM`; deal stage is context, not the report trigger.
 - Local mock checks passed for one Exio Sellers deal, duplicate contacts, multiple deals, and a deal in another pipeline.
-- A second controlled attendee email did not match an exact Freshsales contact, including an exact filtered email search. Broader read-only search later found an existing contact under a different primary email and one linked Exio Sellers deal. The new attendee email is not verified as belonging to that contact, so matching stops for human review. The connected calendars did not show the meeting. No record was created or guessed.
-- A narrow read-only diagnostic was added to search leads and exact contact emails. The live test returned no exact contact for the new email and no distinct lead via broad search. Temporary diagnostic values were cleared after testing. No Freshsales records were created, edited, deleted, or uploaded.
+- With explicit authorization, a second attendee email was added to the verified existing Contact while retaining its original primary email. A fresh read confirmed both entries. The lookup now verifies secondary email matches against the full Contact; the live test returned one Contact and one Exio Sellers deal with `AWAITING_COMPLETED_ZOOM`. The connected calendars still do not show the pending meeting.
+- A narrow diagnostic identified the email mismatch. The single authorized Contact email edit succeeded; its temporary write code and variables were removed or disabled. No deal records or files were changed. Temporary lookup diagnostics were cleared.
 
 ## Current scope and gate
 
