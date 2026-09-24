@@ -26,3 +26,9 @@ The current Zoom connection is not available, and the test meeting has not yet o
 5. Review outputs, then add notes and files to the same verified deal with duplicate prevention and safe retries.
 
 All CRM write operations remain disabled pending controlled testing.
+
+## Meeting correlation gate (2026-09-24)
+
+- Added a pure read-only decision module and tests for the next stage. It accepts an authenticated completed Zoom meeting's UUID, end time, host, attendee emails, and lookup results. Two invite addresses resolving to the same Contact and single Exio Sellers deal produce one draft-ready match. Different Contacts, missing attendees, multiple deals, and meetings without confirmed completion stop or wait.
+- The module is not yet wired to Zoom or Calendar. Roald's calendar and Zoom data are not connected here; Jason's Zoom access is also pending. No transcript, report, note, or file has been retrieved or written.
+- Local Node tests passed for the two-address case, unfinished meeting, different Contacts, missing attendee, and multiple deals.
