@@ -237,7 +237,7 @@ async function runContactEmailMaintenance() {
   const expectedName = process.env.CONTACT_EMAIL_UPDATE_NAME;
   const primary = process.env.CONTACT_EMAIL_UPDATE_PRIMARY?.trim().toLowerCase();
   const secondary = process.env.CONTACT_EMAIL_UPDATE_SECONDARY?.trim().toLowerCase();
-  if (!/^\\d+$/.test(id) || !expectedName || !primary || !secondary || primary === secondary) {
+  if (!/^\d+$/.test(id) || !expectedName || !primary || !secondary || primary === secondary) {
     console.error('Contact email maintenance: invalid configuration');
     return;
   }
