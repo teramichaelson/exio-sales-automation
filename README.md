@@ -1,33 +1,28 @@
-# Exio Sales Automation - Test 2
+# Exio Sales Automation
 
-This is a read-only starter service for Railway.
+The Railway service currently provides a protected, read-only Freshsales lookup and a tested meeting-correlation decision module. It does not retrieve Zoom data or write reports or files to Freshsales.
 
-## Current capability
+## Live lookup
 
-`GET /test/freshsales-lookup?email=person@example.com`
+`GET /test/freshsales-lookup?email=person@example.com` with the private `x-test-token` header:
 
-The endpoint:
-1. Finds an exact Freshsales contact by email.
-2. Fetches that contact with connected deals.
-3. Returns the contact and deals as JSON.
-4. Does not create, update, delete, or attach anything in Freshsales.
+1. Finds an exact primary or secondary Freshsales Contact email, verifying secondary addresses on the full Contact record.
+2. Returns Contact ID, name, primary email, connected deals and Deal IDs, stage, and pipeline.
+3. Returns `SINGLE_EXIO_SELLERS_DEAL` and `AWAITING_COMPLETED_ZOOM` only for one verified Exio Sellers deal. Missing or multiple Contacts/deals require human review.
 
-## Required Railway variables
+The test token and Freshsales API key remain in Railway environment variables. Never put their values in GitHub or chat.
 
-- `FRESHSALES_BASE_URL` - full Freshsales bundle alias, ending in `/crm/sales`
-- `FRESHSALES_API_KEY` - regenerated Freshsales API key
-- `TEST_TOKEN` - a private random value used to protect this temporary test endpoint
+## Meeting decision module
 
-Railway automatically provides `PORT`.
+`meeting-match.mjs` accepts a completed Zoom meeting identity (UUID, end time, host), selected external attendee email addresses, and the results of the Freshsales lookup for each address. It returns one draft-ready Contact/Deal match when all addresses resolve to the same Contact and one Exio Sellers deal. Missing completion evidence or ambiguous matches wait or require review. Run `node --test meeting-match.test.mjs` for the controlled cases.
 
-## Test request
+This module is not yet connected to Calendar or Zoom. The caller must provide completion evidence from authorized Zoom access, not an unverified calendar end time. Roald's host data is needed for his calls and Jason's for his. Reports and Freshsales writes remain disabled.
 
-Send a GET request to:
+## Railway variables
 
-`https://YOUR-RAILWAY-DOMAIN/test/freshsales-lookup?email=REAL_TEST_EMAIL`
+- `FRESHSALES_BASE_URL`: Freshsales site root or `/crm/sales` URL.
+- `FRESHSALES_API_KEY`: private Freshsales API key.
+- `TEST_TOKEN`: private test endpoint token.
+- `PORT`: supplied by Railway.
 
-Include the header:
-
-`x-test-token: YOUR_TEST_TOKEN`
-
-Do not enable write operations until contact/deal matching has been verified with controlled records.
+Temporary diagnostics are opt-in and should be cleared after testing. See `IMPLEMENTATION_LOG.md` for progress and remaining gates.
