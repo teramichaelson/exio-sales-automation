@@ -284,4 +284,24 @@ app.listen(PORT, async () => {
       console.error('Read-only stage list diagnostic failed:', error.message);
     }
   }
+  if (process.env.TEST_SEARCH_QUERY) {
+    try {
+      const base = normalizeBaseUrl(FRESHSALES_BASE_URL);
+      for (const query of process.env.TEST_SEARCH_QUERY.split(',').map(value => value.trim()).filter(Boolean)) {
+        const url = `${base}/api/search?q=${encodeURIComponent(query)}&include=contact,deal&per_page=100`;
+        const response = await fetch(url, { headers: freshsalesHeaders(), signal: AbortSignal.timeout(20000) });
+        const results = await response.json();
+        console.log('Read-only Freshsales search diagnostic', JSON.stringify({
+          query,
+          http_status: response.status,
+          result_count: Array.isArray(results) ? results.length : null,
+          results: Array.isArray(results) ? results.map(item => ({
+            id: item.id, type: item.type, name: item.name, email: item.email
+          })) : undefined
+        }));
+      }
+    } catch (error) {
+      console.error('Read-only Freshsales search diagnostic failed:', error.message);
+    }
+  }
 });
