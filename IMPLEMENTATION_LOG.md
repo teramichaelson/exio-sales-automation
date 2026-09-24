@@ -1,27 +1,28 @@
 # Exio Sales Automation implementation log
 
-Updated: 2026-09-23 UTC
+Updated: 2026-09-24 UTC
 
 ## Completed and verified
 
-- Identified the existing public Railway service and applied previously staged Freshsales environment variables. Health returned HTTP 200 with no missing configuration.
-- Corrected Freshsales contact lookup and connected deal response parsing using live read-only diagnostics. The service normalizes a Freshsales site root to the CRM API path.
-- Local mock checks passed for one associated deal, duplicate contacts, and multiple deals.
-- Live read-only lookup returned an exact contact and one associated deal. The deal's stage was not approved as open, so the endpoint returned HTTP 409 `DEAL_STAGE_REVIEW` rather than selecting it.
-- The temporary startup diagnostic was disabled after verification. Secrets remain in Railway variables. No Freshsales records were created, edited, deleted, or uploaded.
+- Existing public Railway service is healthy, with Freshsales credentials stored in Railway variables.
+- Read-only Freshsales lookup returns an exact contact, associated deal IDs, deal stage, and pipeline. Multiple contacts or deals stop for human review. A deal outside Exio Sellers stops for review.
+- The Exio Sellers match was verified live with a known record. The response is `SINGLE_EXIO_SELLERS_DEAL` with `AWAITING_COMPLETED_ZOOM`; deal stage is context, not the report trigger.
+- Local mock checks passed for one Exio Sellers deal, duplicate contacts, multiple deals, and a deal in another pipeline.
+- A second controlled attendee email did not match an exact Freshsales contact. Broader read-only searches also returned no contact or deal. The connected calendars did not show the meeting. No record was created or guessed.
+- Temporary diagnostics were disabled after testing. No Freshsales records were created, edited, deleted, or uploaded.
 
-## Current gate
+## Current scope and gate
 
-`OPEN_DEAL_STAGE_IDS` is intentionally unset. Exio must approve the IDs for open stages and supply a controlled contact with a known open deal before deal selection or downstream writes are enabled. Multiple associated deals return `MULTIPLE_DEALS_REVIEW`.
+Sales call reports apply to Exio Sellers leads/deals **after a completed Zoom meeting**. Meetings may be hosted by either of two Exio salespeople. The automation must correlate the Zoom meeting, attendee email, and one verified Exio Sellers deal before drafting or uploading a report. ChatGPT can prepare the analysis and follow-up agenda; Claude is optional.
+
+The current Zoom connection is not available, and the test meeting has not yet occurred. Calendar visibility for both hosts and a verified CRM destination are needed for the next controlled end-to-end test. A missing or ambiguous match requires human review.
 
 ## Next stages
 
-1. Verify open-stage mapping and one eligible deal in a controlled read-only test.
-2. Match one salesperson's Google Calendar event attendee email to the exact contact and deal.
-3. Confirm Scoutbot's authenticated report API and generate a pre-call report.
-4. Upload to the verified Freshsales deal files with duplicate prevention.
-5. Correlate Zoom meeting to the calendar event and deal; retrieve summary and transcript.
-6. Write summary and transcript to Freshsales with idempotency.
-7. Use an Exio-approved rubric for Claude analysis, produce a follow-up agenda, and upload it to the same deal.
+1. Establish access to both hosts' calendars and Zoom meetings; capture event ID, Zoom meeting ID/UUID, host, attendee email, and actual completion status.
+2. Resolve attendee to one Freshsales contact and one Exio Sellers deal. Stop on missing or multiple matches.
+3. For pre-call work, confirm Scoutbot's authenticated API and generate a report only for a verified meeting/deal pair.
+4. After Zoom processing completes, retrieve summary and transcript; draft ChatGPT call analysis and follow-up agenda using an Exio-approved rubric.
+5. Review outputs, then add notes and files to the same verified deal with duplicate prevention and safe retries.
 
-Each stage must stop for human review on ambiguous matches. Freshsales write operations remain disabled.
+All CRM write operations remain disabled pending controlled testing.
