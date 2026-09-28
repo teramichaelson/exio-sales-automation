@@ -26,3 +26,7 @@ This module is not yet connected to Calendar or Zoom. The caller must provide co
 - `PORT`: supplied by Railway.
 
 Temporary diagnostics are opt-in and should be cleared after testing. See `IMPLEMENTATION_LOG.md` for progress and remaining gates.
+
+## Pre-call PDF upload preparation
+
+`freshsales-pdf.mjs` is an unused helper for attaching a verified PDF to one Exio Sellers deal via Freshsales. It checks PDF bytes, re-reads the deal, looks for an existing filename, and uses a private multipart attachment. Run `node --test freshsales-pdf.test.mjs` for mock checks. It is not called by the live service, and no Scoutbot PDF has been generated or uploaded. Scoutbot's authenticated generation/PDF contract and a current call event are needed before an end-to-end test.
