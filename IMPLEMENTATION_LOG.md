@@ -32,3 +32,9 @@ All CRM write operations remain disabled pending controlled testing.
 - Added a pure read-only decision module and tests for the next stage. It accepts an authenticated completed Zoom meeting's UUID, end time, host, attendee emails, and lookup results. Two invite addresses resolving to the same Contact and single Exio Sellers deal produce one draft-ready match. Different Contacts, missing attendees, multiple deals, and meetings without confirmed completion stop or wait.
 - The module is not yet wired to Zoom or Calendar. Roald's calendar and Zoom data are not connected here; Jason's Zoom access is also pending. No transcript, report, note, or file has been retrieved or written.
 - Local Node tests passed for the two-address case, unfinished meeting, different Contacts, missing attendee, and multiple deals.
+
+## Scoutbot pre-call PDF stage (2026-09-28)
+
+- Scoutbot browser access was rejected by automatic approval review because the workspace was out of credits. No Scoutbot report was generated, and no Freshsales file was attached.
+- Added an unused, guarded Freshsales PDF attachment helper with mock tests. It requires one verified Exio Sellers deal, validates PDF bytes, checks the deal and existing files, and prepares a private multipart attachment. Local tests passed for upload fields, duplicate skip, ambiguous deal, and invalid PDF.
+- The helper is not wired into the live service. Scoutbot's generation/PDF contract, a real report, current calendar event correlation, and a controlled live attachment test remain pending.
