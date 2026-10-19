@@ -108,3 +108,10 @@ class SchemaTests(unittest.TestCase):
   b=[{'name':'cf_preferred_minimum_ebitda','type':'dropdown','position':9,'choices':[{'id':9876,'value':'$5M','position':2}]}]
   self.assertEqual(schema_hash(a),schema_hash(b))
   b[0]['choices'][0]['value']='$6M';self.assertNotEqual(schema_hash(a),schema_hash(b))
+
+class MultiSelectTests(unittest.TestCase):
+ def test_wire_encoding_and_readback(self):
+  self.assertEqual(serialize_fields({'x':['A','B']}),{'x':'A;B'})
+  self.assertTrue(field_matches('B;A',['A','B']))
+  self.assertFalse(field_matches(None,['A']))
+  self.assertFalse(field_matches('A;C',['A','B']))
