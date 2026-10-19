@@ -232,9 +232,11 @@ class CRM:
     def call(self,method,path,data=None):
         if not path.startswith('/api/'):raise ValueError('Unexpected API path')
         time.sleep(1)
-        req=urllib.request.Request(self.base+path,method=method,headers={'Authorization':'Token token='+self.key,'Content-Type':'application/json'},data=json.dumps(data).encode() if data is not None else None)
+        req=urllib.request.Request(self.base+path,method=method,headers={'Authorization':'Token token='+self.key,'Content-Type':'application/json','Accept':'application/json'},data=json.dumps(data).encode() if data is not None else None)
         # Writes are NEVER retried automatically. Reconcile uncertain outcomes first.
-        with urllib.request.build_opener(NoRedirect).open(req,timeout=20) as r:return json.load(r)
+        with urllib.request.build_opener(NoRedirect).open(req,timeout=20) as r:
+            try:return json.load(r)
+            except json.JSONDecodeError:raise ValueError('CRM did not return JSON: '+str(r.status)+' '+str(r.headers.get('Content-Type')))
     def contact(self,cid):
         if not str(cid).isdigit():raise ValueError('Invalid contact id')
         c=self.call('GET','/api/contacts/'+str(cid))['contact']
@@ -246,7 +248,7 @@ class CRM:
         if urllib.parse.urlsplit(path).path!=expected:raise ValueError('Unexpected notes link')
         all_notes=[]
         for page in range(1,101):
-            req=urllib.request.Request('https://goexio.freshworks.com'+path+('&' if '?' in path else '?')+'per_page=100&page='+str(page),headers={'Authorization':'Token token='+self.key})
+            req=urllib.request.Request('https://goexio.freshworks.com'+path+('&' if '?' in path else '?')+'per_page=100&page='+str(page),headers={'Authorization':'Token token='+self.key,'Accept':'application/json','Content-Type':'application/json'})
             with urllib.request.build_opener(NoRedirect).open(req,timeout=20) as r:d=json.load(r)
             rows=d.get('notes')
             if not isinstance(rows,list):raise ValueError('Unexpected notes response')
