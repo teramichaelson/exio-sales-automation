@@ -209,3 +209,12 @@ class SeatTests(unittest.TestCase):
   c=FakeCRM();c.c['custom_field']['cf_preferred_minimum_ebitda']='$3M'
   with patch.dict(os.environ,{'ENRICHMENT_WRITES':'enabled'}):r=finish(self.s,{**batch(self.s)[0],'outcome':'criteria','findings':[self.finding]},c)
   self.assertEqual(r['writes'][0]['state'],'verified');self.assertEqual(c.c['custom_field']['cf_preferred_minimum_ebitda'],'$3M');self.assertEqual(len(c.saved_notes),1)
+
+class SeatDraftTests(unittest.TestCase):
+ setUp=Tests.setUp
+ tearDown=Tests.tearDown
+ def test_disabled_writes_prepare_without_mutation_or_approval(self):
+  from seat import batch,finish
+  c=FakeCRM()
+  with patch.dict(os.environ,{'ENRICHMENT_WRITES':'disabled'}):r=finish(self.s,{**batch(self.s)[0],'outcome':'criteria','findings':[self.finding]},c)
+  self.assertEqual(c.calls,0);self.assertEqual(r['writes'][0]['state'],'dry_run');self.assertEqual(self.s.db.execute('SELECT state FROM proposals').fetchone()[0],'pending');self.assertEqual(batch(self.s),[])

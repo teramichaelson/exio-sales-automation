@@ -1,5 +1,5 @@
 """Small evidence batches reviewed in ChatGPT; no external model API calls."""
-import json
+import json,os
 from worker import digest,make_proposal,apply,now,FIELDS
 
 def packet(store,d):
@@ -34,15 +34,19 @@ def finish(store,body,crm=None):
         schema=crm.schema()
         for cid in ids[:10]:
             pid=make_proposal(store,cid,body['findings'],schema)
-            with store.db:store.db.execute("UPDATE proposals SET state='approved',reason=? WHERE id=? AND state='pending'",('Reviewed in ChatGPT against supplied evidence',pid))
-            results.append(apply(store,pid,crm,execute=True))
+            if os.environ.get('ENRICHMENT_WRITES')=='enabled':
+                with store.db:store.db.execute("UPDATE proposals SET state='approved',reason=? WHERE id=? AND state='pending'",('Reviewed in ChatGPT against supplied evidence',pid))
+                results.append(apply(store,pid,crm,execute=True))
+            else:
+                result=apply(store,pid,crm,execute=False);result['proposal_id']=pid;results.append(result)
+                with store.db:store.db.execute("UPDATE contacts SET status='proposal_ready' WHERE id=?",(cid,))
         # Remaining contacts are eligible on the next pass, not silently skipped.
         left=store.db.execute("SELECT count(*) FROM contacts WHERE domain=? AND status='pending'",(d,)).fetchone()[0]
-        state='evidence_ready' if left else 'extracted'
+        state='evidence_ready' if left else ('seat_prepared' if os.environ.get('ENRICHMENT_WRITES')!='enabled' else 'extracted')
     else:
         state='no_criteria' if outcome=='no_criteria' else 'extraction_hold'
         with store.db:store.db.execute("UPDATE contacts SET status=? WHERE domain=? AND status='pending'",(outcome,d))
     with store.db:
         store.db.execute('UPDATE firms SET status=? WHERE domain=?',(state,d))
         store.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('seat_review:'+d,json.dumps({'at':now(),'outcome':outcome,'source_sha':sha,'reason':str(body.get('reason',''))[:500]})))
-    return {'domain':d,'outcome':outcome,'contacts':len(ids),'writes':[{k:v for k,v in r.items() if k in ('contact_id','state','skipped','fill_empty_custom_fields')} for r in results]}
+    return {'domain':d,'outcome':outcome,'contacts':len(ids),'writes':[{k:v for k,v in r.items() if k in ('contact_id','state','skipped','fill_empty_custom_fields','proposal_id')} for r in results]}
