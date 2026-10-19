@@ -132,3 +132,25 @@ class RecoveryTests(unittest.TestCase):
   with patch.dict(os.environ,{'ENRICHMENT_WRITES':'enabled'}):
    with self.assertRaises(ValueError):repair_fields(self.s,pid,crm)
   self.assertEqual(crm.calls,0)
+
+class SchedulingTests(unittest.TestCase):
+ setUp=Tests.setUp
+ tearDown=Tests.tearDown
+ def test_daily_limit_survives_multiple_batches(self):
+  for _ in range(3):self.s.charge('domains',1,3)
+  with self.assertRaises(BudgetExceeded):self.s.charge('domains',1,3)
+ def test_compressed_source_cache_is_reused(self):
+  import zlib
+  self.s.db.execute('INSERT INTO pages VALUES (?,?,?,?,?)',('https://example.com/','example.com',zlib.compress(b'cached text'),'test',now()));self.s.db.commit()
+  self.assertEqual(fetch_page('https://example.com/','example.com',self.s),'cached text')
+  self.assertEqual(self.s.db.execute('SELECT count(*) FROM usage').fetchone()[0],0)
+ def test_storage_limit_stops_research(self):
+  from run import tick
+  class FakeDB:
+   def execute(self,q,*a):
+    class Row:
+     def fetchone(self):return (110000 if 'page_count' in q else 4096,)
+    return Row()
+  class FakeStore:
+   db=FakeDB()
+  with patch('run.report',return_value={'queued':False}):self.assertEqual(tick(FakeStore())['research_stop'],'storage_soft_limit')
