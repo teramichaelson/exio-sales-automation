@@ -1,6 +1,6 @@
 # Budgeted buyer enrichment
 
-This isolated Python worker replaces repeated browser research and spreadsheet imports with a resumable SQLite queue. It does not change the existing Node service or launch automatically.
+This isolated Python worker replaces repeated browser research and spreadsheet imports with a resumable SQLite queue. It runs as a separate private service and scheduled runner; the existing Node service is unchanged.
 
 ## Data flow
 
@@ -30,7 +30,7 @@ python enrichment/run.py --db /data/enrichment.sqlite --ai --write-approved
 
 `FRESHSALES_BASE_URL` and `FRESHSALES_API_KEY` must be supplied through a secret manager. `ENRICHMENT_WRITES=enabled` is additionally required for writes. Reuse the existing service's credential by a Railway variable reference, without copying its secret into chat or source code. There is no public HTTP endpoint.
 
-AI defaults off. Configure `OPENAI_API_KEY` and an explicitly chosen `ENRICHMENT_AI_MODEL` to enable it. ChatGPT seat usage is not an API credential. API requests can incur separate charges; no live paid model request was made during development.
+AI requires `OPENAI_API_KEY`, the explicitly chosen `ENRICHMENT_AI_MODEL` and an enabled flag. ChatGPT seat usage is not an API credential. API requests incur metered charges; successful responses retain model/token usage without credentials.
 
 Current conservative limits are ten domain attempts, sixty website requests, five AI requests and twenty-five approved contact writes per tick. Domain and HTTP counters persist per UTC day, so repeated ticks cannot exceed their daily limits. AI also persists a five-call daily ceiling, 120,000 input-byte reservation and 30,000 reserved output bytes; each request allows at most 1,500 output tokens. Byte reservations are conservative controls, not dollar or token billing measurements. Change limits only after measuring quality and usage. `run.py` is intended to be a short scheduled job, not an AI conversation that wakes hourly to reason through a workbook.
 
@@ -61,7 +61,7 @@ Before enabling a Railway cron job:
 1. Restore the private checkpoint to a persistent `/data` volume; verify its inventory and checksum. Keep the original workbook unchanged.
 2. Attach the existing Freshsales credential via variable references. Refresh and save the field schema privately.
 3. Configure an API model/key and a measured spending ceiling if AI is required; leave AI off otherwise.
-4. Keep the old browser enrichment task paused. Run one complete source-backed dry-run, then one controlled production contact write with note and field readback. API contact/schema/notes reads have been exercised; live writes are not yet verified.
+4. Keep the old browser enrichment task paused. Run one complete source-backed dry-run, then one controlled production contact write with note and field readback. The earlier controlled live field/note pilot has passed; model extraction must also pass before broader activation.
 5. Configure weekly/completion email delivery and deduplication. Schedule only this bounded worker after the pilot passes. Increase throughput gradually from the conservative validation limits.
 6. Resolve identity and unavailable-source queues separately and reconcile historical criteria flags. Stop via the cron setting or remove `ENRICHMENT_WRITES=enabled`.
 
@@ -75,16 +75,18 @@ Tests cover domain exclusions, identity holds, exact evidence, dropdown options,
 
 API contracts were checked against the official Freshsales API documentation at https://developers.freshworks.com/crm/api/ and OpenAI Responses API documentation at https://developers.openai.com/api/reference/resources/responses/methods/create .
 
-## Private deployment follow-up
+## Private deployment and scheduling
 
-The branch also contains `service.py` and a Python Dockerfile. A separate Railway worker has been deployed with a persistent `/data` volume, no public domain and production writes disabled. Private health and authenticated status probes succeeded; unauthenticated status was rejected. The worker is still awaiting checkpoint transfer. The public-domain action was blocked by automatic approval review because the service contains buyer-data and CRM administrative routes. Do not expose it without explicit authorization. Prefer an authenticated private transfer path when available.
+The restored checkpoint lives on the private worker's persistent `/data` volume. The worker, runner and validation probe have no public domains. The runner calls authenticated `/tick` at ten minutes past each hour. The worker starts a background batch, skips overlaps and records its completed result in `last_job`.
 
-`/bootstrap` is authenticated, bounded and one-time: it integrity-checks a SQLite checkpoint before atomically installing it, and refuses to replace an existing checkpoint. `/prepare` produces a dry-run; `/approve` does not itself write to CRM; `/apply` additionally requires `ENRICHMENT_WRITES=enabled`. There is no automatic scheduler in the HTTP service. Run `run.py` as a separately managed bounded job only after the checkpoint and controlled write pilot pass. `test_service.py` adds six checks for authentication, health data exposure, missing checkpoint, invalid SQLite and one-time bootstrap. The combined suite now has 25 tests.
+Each source batch has at most 8 domains. Persistent UTC-day ceilings are 200 attempted domains and 1,000 website requests. Cached HTML is compressed; queue queries are indexed. Source collection stops at 400 MiB database size. A source packet alone does not count as interpreted or saved criteria.
 
-## Scheduled source collection and reporting
+AI requires the key/model and `ENRICHMENT_AI_ENABLED=enabled`. Strict structured extraction is followed by a separately cached semantic review before automatic approval. Exact evidence, schema and affiliation checks also run locally. Every domain advances to no-criteria, extracted or a review hold rather than replaying the first cached packet indefinitely. Up to five domains are interpreted per tick. Daily call/input/output reservations are atomic and survive restarts. Defaults are 5 calls, 120,000 input bytes and 30,000 reserved output bytes; configurable ceilings are 100 calls, 1,200,000 input bytes and 600,000 reserved output bytes per UTC day. Every call reserves 1,500 output tokens (6,000 bytes). These controls are not a billing guarantee. Token usage is retained separately in `ai_usage`.
 
-A separate private Railway Function calls authenticated `/tick` at ten minutes past each hour. The worker starts a background batch and skips overlapping starts. Scheduled collection is bounded to 8 domains per batch, 200 attempted domains and 1,000 website requests per UTC day. Counters survive restarts. Cached HTML is compressed, queue lookups use indexes, and collection stops at a 400 MiB database soft limit on the existing volume. This is source preparation, not proof that acquisition criteria have been interpreted or saved to CRM.
+Scheduled writes require `ENRICHMENT_WRITES=enabled`. At most 25 approved contacts are written per tick. Unsupported, rejected or uncertain outcomes remain held. Only blank supported fields are filled and dated source notes are appended; readback verifies both. Removing either enabled flag pauses that stage. Removing the runner cron pauses processing. The original workbook/history are preserved.
 
-AI extraction remains off until a key, model and explicit enabled flag are configured; scheduled ticks do not perform production writes. The live pilot has separately verified field/note writes and deduplication. The existing ChatGPT automation was converted from hourly browser research to a weekly reporting task, Mondays at 8 a.m. America/Los_Angeles, starting October 26, 2026. It reads fresh private status via the read-only probe, checks Gmail Sent to prevent duplicate weekly/completion reports, and reports the missing AI connection accurately. This moves repeated source retrieval out of ChatGPT agent conversations.
+The reporting automation runs Mondays at 8 a.m. America/Los_Angeles, checks Gmail Sent for duplicates, and sends at most one weekly email plus a completion email. Its private read-only probe fetches fresh status. Pending research, identity/review holds, pending/approved proposals and uncertain writes prevent a false completion report. The original inventory is not a reconciliation of all buyers currently in Freshsales; newly added buyers and held identities require a separate inventory pass before the entire project can be declared complete.
 
-The combined test suite now has 32 tests. The private scheduled runner's first deployment returned HTTP 202 with state `started`; check worker `last_job` status and counts for batch completion, rather than treating request acceptance as completed research.
+Private routes include health/status, one-time checkpoint bootstrap, source collection/evidence, controlled extraction and proposals, usage, prepare/approve/apply and explicit uncertain-write reconciliation. These administrative routes must remain private.
+
+The automated suite currently has 38 tests, including semantic-review rejection, no-criteria queue advancement, actual usage retention, atomic reservations and pause/resume after a daily budget. The October 19 credential check authenticated successfully and retrieved the configured gpt-4.1-mini model. The generation test was rejected with HTTP 429, error code credit_balance_exhausted, type insufficient_quota. AI and scheduled writes remain disabled pending funded API access and a successful extraction pilot. Source collection and weekly reporting remain active. No successful model output or new CRM update resulted from this credential test.
