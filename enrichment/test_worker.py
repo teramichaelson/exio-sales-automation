@@ -189,3 +189,23 @@ class AutonomousExtractionTests(unittest.TestCase):
   from run import report
   self.s.db.execute("UPDATE contacts SET status='review_hold'");self.s.db.execute("UPDATE firms SET status='extraction_hold'");self.s.db.commit()
   self.assertEqual(report(self.s)['kind'],'weekly')
+
+class SeatTests(unittest.TestCase):
+ setUp=Tests.setUp
+ tearDown=Tests.tearDown
+ def test_review_checkpoint_advances_queue(self):
+  from seat import batch,finish
+  b=batch(self.s)[0];r=finish(self.s,{**b,'outcome':'no_criteria','full_source_reviewed':True})
+  self.assertEqual(r['outcome'],'no_criteria');self.assertEqual(batch(self.s),[])
+ def test_changed_source_cannot_be_marked_done(self):
+  from seat import batch,finish
+  b=batch(self.s)[0];b['evidence_sha']='stale'
+  with self.assertRaises(ValueError):finish(self.s,{**b,'outcome':'no_criteria','full_source_reviewed':True})
+ def test_partial_review_cannot_claim_no_criteria(self):
+  from seat import batch,finish
+  with self.assertRaises(ValueError):finish(self.s,{**batch(self.s)[0],'outcome':'no_criteria'})
+ def test_seat_write_verifies_and_preserves_existing_fields(self):
+  from seat import batch,finish
+  c=FakeCRM();c.c['custom_field']['cf_preferred_minimum_ebitda']='$3M'
+  with patch.dict(os.environ,{'ENRICHMENT_WRITES':'enabled'}):r=finish(self.s,{**batch(self.s)[0],'outcome':'criteria','findings':[self.finding]},c)
+  self.assertEqual(r['writes'][0]['state'],'verified');self.assertEqual(c.c['custom_field']['cf_preferred_minimum_ebitda'],'$3M');self.assertEqual(len(c.saved_notes),1)

@@ -91,6 +91,16 @@ class Handler(BaseHTTPRequestHandler):
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);c=crm.contact(body['contact_id']);result={'contact':c}
      try:result['notes']=crm.notes(c)
      except Exception as e:result['notes_error']={'type':type(e).__name__,'message':str(e)[:120]}
+    elif self.path=='/seat-batch':
+     from seat import batch
+     result=batch(s,body.get('limit',5))
+    elif self.path=='/seat-review':
+     from seat import finish
+     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']) if body.get('outcome')=='criteria' else None
+     result=finish(s,body,crm)
+    elif self.path=='/seat-schema':
+     from worker import FIELDS
+     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);result=[{'name':f['name'],'type':f.get('type'),'choices':[{'value':c['value']} for c in f.get('choices',[])]} for f in crm.schema() if f['name'] in FIELDS.values()]
     elif self.path=='/extract':
      from extract import prepare_domain
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);result=prepare_domain(s,body['domain'],crm.schema(),review=True)
