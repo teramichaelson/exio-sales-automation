@@ -2,7 +2,7 @@
 import hmac,json,os,sqlite3,tempfile,threading
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
-from worker import Store,CRM,lock,make_proposal,apply,research
+from worker import Store,CRM,lock,make_proposal,apply,research,fetch_page,Text,domain,now
 DB=os.environ.get('ENRICHMENT_DB','/data/enrichment.sqlite')
 TOKEN=os.environ.get('ENRICHMENT_ADMIN_TOKEN','')
 MAX_UPLOAD=128*1024*1024
@@ -56,10 +56,21 @@ class Handler(BaseHTTPRequestHandler):
     if self.path=='/research':
      from worker import BudgetExceeded
      result=research(s,limit=10,requests=60,only_domain=body.get('domain'))
+    elif self.path=='/source':
+     from urllib.robotparser import RobotFileParser
+     d=domain(body['url']);row=s.db.execute('SELECT status,legacy FROM firms WHERE domain=?',(d,)).fetchone()
+     if not row or row['status']!='evidence_ready':raise ValueError('Research packet must exist first')
+     robots=RobotFileParser();robots.parse(fetch_page('https://'+d+'/robots.txt',d,s).splitlines())
+     if not robots.can_fetch('ExioBuyerResearch',body['url']):raise ValueError('Robots disallow')
+     t=Text();t.feed(fetch_page(body['url'],d,s));packet=json.loads(row['legacy']);pages=dict(packet.get('pages',[]));pages[body['url']]=t.text();packet['pages']=list(pages.items());packet['retrieved_at']=now()
+     with s.db:s.db.execute('UPDATE firms SET legacy=? WHERE domain=?',(json.dumps(packet),d))
+     result={'domain':d,'url':body['url'],'text':t.text()}
     elif self.path=='/evidence':
      r=s.db.execute('SELECT status,legacy FROM firms WHERE domain=?',(body['domain'],)).fetchone();result=dict(r) if r else None
     elif self.path=='/inspect':
-     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);c=crm.contact(body['contact_id']);result={'contact':c,'notes':crm.notes(c)}
+     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);c=crm.contact(body['contact_id']);result={'contact':c}
+     try:result['notes']=crm.notes(c)
+     except Exception as e:result['notes_error']={'type':type(e).__name__,'message':str(e)[:120]}
     elif self.path=='/prepare':
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);pid=make_proposal(s,body['contact_id'],body['findings'],crm.schema());result={'proposal_id':pid,'dry_run':apply(s,pid,crm)}
     elif self.path=='/approve':
