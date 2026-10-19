@@ -269,6 +269,48 @@ def plan_fields(contact,payload):
         if key and custom.get(key) in (None,'',[]):updates[key]=f['value']
     return updates
 
+def field_matches(actual,expected):
+    if isinstance(expected,list):
+        if isinstance(actual,str):actual=[x.strip() for x in actual.split(';') if x.strip()]
+        return isinstance(actual,list) and sorted(actual)==sorted(expected)
+    return actual==expected
+
+def serialize_fields(updates):
+    return {k:';'.join(v) if isinstance(v,list) else v for k,v in updates.items()}
+
+def repair_fields(store,pid,crm):
+    if os.getenv('ENRICHMENT_WRITES')!='enabled':raise ValueError('Live writes disabled')
+    w=store.db.execute('SELECT * FROM writes WHERE id=?',(pid,)).fetchone()
+    row=store.db.execute('SELECT payload FROM proposals WHERE id=?',(pid,)).fetchone()
+    if not w or w['state']!='uncertain_review' or not row:raise ValueError('No uncertain write to reconcile')
+    p=json.loads(row['payload']);before=json.loads(w['before_json']);expected=plan_fields(before,p);current=crm.contact(p['contact_id'])
+    if schema_hash(crm.schema())!=p['schema_sha']:raise ValueError('Schema changed')
+    if current.get('custom_field',{}).get('cf_type')!='Buyer':raise ValueError('Contact is not Buyer')
+    emails=[current.get('email','')]+[x.get('value','') for x in current.get('emails',[])]
+    if not any(domain(e)==p['domain'] for e in emails):raise ValueError('Live affiliation mismatch')
+    marker='[Exio enrichment '+pid+']'
+    if sum(marker in str(n.get('description','')) for n in crm.notes(current))!=1:raise ValueError('Exactly one original source note is required')
+    missing={}
+    for k,v in expected.items():
+        actual=current.get('custom_field',{}).get(k)
+        if field_matches(actual,v):continue
+        if actual not in (None,'',[]):raise ValueError('Field has a conflicting newer value')
+        missing[k]=v
+    with store.db:store.db.execute("UPDATE writes SET state='repair_in_flight' WHERE id=?",(pid,))
+    try:
+        if missing:crm.call('PUT','/api/contacts/'+p['contact_id'],{'contact':{'custom_field':serialize_fields(missing)}})
+        after=crm.contact(p['contact_id'])
+        if any(not field_matches(after.get('custom_field',{}).get(k),v) for k,v in expected.items()):raise ValueError('Field-only repair readback mismatch')
+        if sum(marker in str(n.get('description','')) for n in crm.notes(after))!=1:raise ValueError('Source note verification failed')
+        with store.db:
+            store.db.execute("UPDATE writes SET state='verified',after_json=? WHERE id=?",(json.dumps(after),pid))
+            store.db.execute("UPDATE proposals SET state='verified' WHERE id=?",(pid,))
+            store.db.execute("UPDATE contacts SET status='reviewed' WHERE id=?",(p['contact_id'],))
+        return {'contact_id':p['contact_id'],'state':'verified','repaired_fields':list(missing),'notes_created':0}
+    except Exception:
+        with store.db:store.db.execute("UPDATE writes SET state='repair_uncertain_review' WHERE id=?",(pid,))
+        raise
+
 def apply(store,pid,crm,execute=False):
     proposal=store.db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone()
     if not proposal:raise ValueError('Unknown proposal')
@@ -291,10 +333,10 @@ def apply(store,pid,crm,execute=False):
         existing_notes=crm.notes(c)
         note_exists=any('[Exio enrichment '+pid+']' in str(n.get('description','')) for n in existing_notes)
         if not note_exists and any(f['url'] in str(n.get('description','')) for f in p['findings'] for n in existing_notes):raise ValueError('Legacy source note exists; reconcile rather than duplicate')
-        if updates:crm.call('PUT','/api/contacts/'+p['contact_id'],{'contact':{'custom_field':updates}})
+        if updates:crm.call('PUT','/api/contacts/'+p['contact_id'],{'contact':{'custom_field':serialize_fields(updates)}})
         if not note_exists:crm.call('POST','/api/notes',{'note':{'description':note,'targetable_type':'Contact','targetable_id':int(p['contact_id'])}})
         after=crm.contact(p['contact_id'])
-        if any(after.get('custom_field',{}).get(k)!=v for k,v in updates.items()):raise ValueError('Readback mismatch')
+        if any(not field_matches(after.get('custom_field',{}).get(k),v) for k,v in updates.items()):raise ValueError('Readback mismatch')
         if not any('[Exio enrichment '+pid+']' in str(n.get('description','')) for n in crm.notes(after)):raise ValueError('Note readback mismatch')
         with store.db:
             store.db.execute('UPDATE writes SET state=?,after_json=? WHERE id=?',('verified',json.dumps(after),pid))
