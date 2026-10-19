@@ -159,10 +159,12 @@ def evidence_packet(pages):
                 lines.append({'url':url,'quote':line[:1600]})
     return lines[:30]
 
-def research(store,limit=10,requests=60):
+def research(store,limit=10,requests=60,only_domain=None):
     from urllib.robotparser import RobotFileParser
     output=[]
     firms=store.db.execute("SELECT domain FROM firms WHERE EXISTS (SELECT 1 FROM contacts c WHERE c.domain=firms.domain AND c.status='pending') AND status IN ('pending','retry') AND attempts<3 AND next_try<=? ORDER BY (SELECT count(*) FROM contacts c WHERE c.domain=firms.domain) DESC,domain LIMIT ?",(time.time(),limit)).fetchall()
+    if only_domain:
+        firms=store.db.execute("SELECT domain FROM firms WHERE domain=? AND status IN ('pending','retry') AND attempts<3 AND next_try<=?",(only_domain,time.time())).fetchall()
     for row in firms:
         d=row[0];store.charge('domains',1,limit);pages=[]
         try:
