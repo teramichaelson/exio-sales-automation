@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded enrichment queue. Python 3.11+, no dependencies for normal operation."""
 import argparse, collections, contextlib, datetime as dt, hashlib, html, ipaddress
-import json, os, re, socket, sqlite3, time, urllib.parse, urllib.request, urllib.error
+import json, os, re, socket, sqlite3, time, urllib.parse, urllib.request, urllib.error, zlib
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -40,6 +40,8 @@ class Store:
         CREATE TABLE IF NOT EXISTS writes(id TEXT PRIMARY KEY,state TEXT,before_json TEXT,after_json TEXT,at TEXT);
         CREATE TABLE IF NOT EXISTS ai_runs(id TEXT PRIMARY KEY,state TEXT,output TEXT);
         CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,at TEXT,kind TEXT,payload TEXT,state TEXT);
+        CREATE INDEX IF NOT EXISTS contacts_domain_status ON contacts(domain,status);
+        CREATE INDEX IF NOT EXISTS firms_queue ON firms(status,next_try,attempts);
         CREATE TABLE IF NOT EXISTS legacy_rows(sheet TEXT,row_index INTEGER,payload TEXT,PRIMARY KEY(sheet,row_index));
         CREATE TABLE IF NOT EXISTS usage(day TEXT PRIMARY KEY,domains INTEGER DEFAULT 0,requests INTEGER DEFAULT 0,ai_calls INTEGER DEFAULT 0,ai_input_bytes INTEGER DEFAULT 0,ai_output_bytes INTEGER DEFAULT 0);
         '''); self.db.commit()
@@ -133,7 +135,7 @@ def public_url(url,expected):
 
 def fetch_page(url,expected,store,request_limit=60):
     cached=store.db.execute('SELECT text FROM pages WHERE url=?',(url,)).fetchone()
-    if cached:return cached[0]
+    if cached:return zlib.decompress(cached[0]).decode() if isinstance(cached[0],bytes) else cached[0]
     opener=urllib.request.build_opener(NoRedirect)
     for hop in range(4):
         public_url(url,expected);store.charge('requests',1,request_limit)
@@ -144,7 +146,7 @@ def fetch_page(url,expected,store,request_limit=60):
                 content=r.read(512001)
                 if len(content)>512000:raise ValueError('Source too large')
                 text=content.decode('utf-8',errors='replace')
-                with store.db:store.db.execute('INSERT OR REPLACE INTO pages VALUES (?,?,?,?,?)',(url,expected,text,digest(text),now()))
+                with store.db:store.db.execute('INSERT OR REPLACE INTO pages VALUES (?,?,?,?,?)',(url,expected,zlib.compress(text.encode()),digest(text),now()))
                 return text
         except urllib.error.HTTPError as e:
             if e.code in (301,302,303,307,308) and e.headers.get('Location'):
@@ -161,14 +163,14 @@ def evidence_packet(pages):
                 lines.append({'url':url,'quote':line[:1600]})
     return lines[:30]
 
-def research(store,limit=10,requests=60,only_domain=None):
+def research(store,limit=10,requests=60,only_domain=None,daily_limit=None):
     from urllib.robotparser import RobotFileParser
     output=[]
     firms=store.db.execute("SELECT domain FROM firms WHERE EXISTS (SELECT 1 FROM contacts c WHERE c.domain=firms.domain AND c.status='pending') AND status IN ('pending','retry') AND attempts<3 AND next_try<=? ORDER BY (SELECT count(*) FROM contacts c WHERE c.domain=firms.domain) DESC,domain LIMIT ?",(time.time(),limit)).fetchall()
     if only_domain:
         firms=store.db.execute("SELECT domain FROM firms WHERE domain=? AND status IN ('pending','retry') AND attempts<3 AND next_try<=?",(only_domain,time.time())).fetchall()
     for row in firms:
-        d=row[0];store.charge('domains',1,limit);pages=[]
+        d=row[0];store.charge('domains',1,daily_limit or limit);pages=[]
         try:
             root='https://'+d+'/'
             robots=RobotFileParser()
@@ -178,7 +180,7 @@ def research(store,limit=10,requests=60,only_domain=None):
                 else: raise
             if not robots.can_fetch('ExioBuyerResearch',root):raise ValueError('Robots disallow')
             text=fetch_page(root,d,store,requests);p=Text();p.feed(text);pages.append((root,p.text()))
-            links=sorted({urllib.parse.urljoin(root,x).split('#')[0] for x in p.links if re.search(r'criteria|investment|approach|strategy|acquisition',x,re.I)})
+            links=sorted({urllib.parse.urljoin(root,x).split('#')[0] for x in p.links if re.search(r'criteria|investment|approach|strategy|acquisition|how-we-work|who-we-are',x,re.I)})
             for url in links[:2]:
                 if domain(url)!=d or not robots.can_fetch('ExioBuyerResearch',url):continue
                 time.sleep(1)
