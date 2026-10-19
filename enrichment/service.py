@@ -2,7 +2,7 @@
 import hmac,json,os,sqlite3,tempfile,threading
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
-from worker import Store,CRM,lock,make_proposal,apply,research,fetch_page,Text,domain,now
+from worker import Store,CRM,lock,make_proposal,apply,research,fetch_page,Text,domain,now,repair_fields
 DB=os.environ.get('ENRICHMENT_DB','/data/enrichment.sqlite')
 TOKEN=os.environ.get('ENRICHMENT_ADMIN_TOKEN','')
 MAX_UPLOAD=128*1024*1024
@@ -76,6 +76,8 @@ class Handler(BaseHTTPRequestHandler):
     elif self.path=='/approve':
      with s.db:s.db.execute("UPDATE proposals SET state='approved' WHERE id=? AND state='pending'",(body['proposal_id'],))
      result={'approved':s.db.total_changes}
+    elif self.path=='/repair-fields':
+     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);result=repair_fields(s,body['proposal_id'],crm)
     elif self.path=='/apply':
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);result=apply(s,body['proposal_id'],crm,execute=True)
     else:self.send(404,{'error':'Unknown route'});return
