@@ -11,7 +11,9 @@ FIELDS = {'minimum_ebitda':'cf_preferred_minimum_ebitda','industries':'cf_prefer
 TERMINAL = {'reviewed','unavailable','identity_hold'}
 
 def now(): return dt.datetime.now(dt.timezone.utc).isoformat()
-def schema_hash(schema): return digest(sorted([f for f in schema if f.get('name') in FIELDS.values()],key=lambda f:f['name']))
+def schema_hash(schema):
+    canonical=[{'name':f['name'],'type':f.get('type'),'choices':sorted([{'id':c.get('id'),'value':c.get('value')} for c in f.get('choices',[])],key=lambda c:str(c['value']))} for f in schema if f.get('name') in FIELDS.values()]
+    return digest(sorted(canonical,key=lambda f:f['name']))
 def digest(v): return hashlib.sha256(json.dumps(v,sort_keys=True,default=str).encode()).hexdigest()
 def domain(v):
     v = str(v or '').strip().lower()
@@ -221,7 +223,9 @@ def make_proposal(store,contact_id,findings,schema):
     if not validated:raise ValueError('No supported findings; keep record pending for review')
     payload={'contact_id':str(contact_id),'domain':d,'findings':validated,'schema_sha':schema_hash(schema),'firm_published':True}
     pid=digest(payload)
-    with store.db:store.db.execute('INSERT OR IGNORE INTO proposals(id,contact_id,domain,payload) VALUES (?,?,?,?)',(pid,str(contact_id),d,json.dumps(payload)))
+    with store.db:
+        store.db.execute("UPDATE proposals SET state='superseded' WHERE contact_id=? AND id<>? AND state='pending'",(str(contact_id),pid))
+        store.db.execute('INSERT OR IGNORE INTO proposals(id,contact_id,domain,payload) VALUES (?,?,?,?)',(pid,str(contact_id),d,json.dumps(payload)))
     return pid
 
 class CRM:
