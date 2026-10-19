@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
 from worker import Store,CRM,lock,make_proposal,apply,research,fetch_page,Text,domain,now,repair_fields
 DB=os.environ.get('ENRICHMENT_DB','/data/enrichment.sqlite')
+JOB_THREAD=None
 TOKEN=os.environ.get('ENRICHMENT_ADMIN_TOKEN','')
 MAX_UPLOAD=128*1024*1024
 class Handler(BaseHTTPRequestHandler):
@@ -24,6 +25,7 @@ class Handler(BaseHTTPRequestHandler):
    else:self.send(404,{'error':'Unknown route'})
   except Exception as e:self.send(409,{'error_type':type(e).__name__})
  def do_POST(self):
+  global JOB_THREAD
   if not self.auth():return
   size=int(self.headers.get('Content-Length','0'))
   try:
@@ -51,6 +53,24 @@ class Handler(BaseHTTPRequestHandler):
    if size>100000:self.send(413,{'error':'Request size limit'});return
    body=json.loads(self.rfile.read(size) or b'{}')
    if not Path(DB).exists():self.send(409,{'error':'Checkpoint not restored'});return
+   if self.path=='/tick':
+    if JOB_THREAD and JOB_THREAD.is_alive():self.send(200,{'state':'already_running'});return
+    if not Path(DB).exists():self.send(409,{'error':'Checkpoint not restored'});return
+    def background():
+     from run import tick
+     try:
+      with lock(DB):
+       s=Store(DB)
+       with s.db:s.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('last_job',json.dumps({'state':'running','started_at':now()})))
+       enabled=bool(os.environ.get('OPENAI_API_KEY') and os.environ.get('ENRICHMENT_AI_MODEL') and os.environ.get('ENRICHMENT_AI_ENABLED')=='enabled')
+       result=tick(s,do_research=True,do_ai=enabled,do_write=False)
+       with s.db:s.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('last_job',json.dumps({'state':'finished','finished_at':now(),'ai_enabled':enabled,'result':result})))
+       s.db.close()
+     except Exception as e:
+      s=Store(DB)
+      with s.db:s.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('last_job',json.dumps({'state':'stopped','at':now(),'error_type':type(e).__name__})))
+      s.db.close()
+    JOB_THREAD=threading.Thread(target=background,daemon=True);JOB_THREAD.start();self.send(202,{'state':'started'});return
    with lock(DB):
     s=Store(DB)
     if self.path=='/research':
