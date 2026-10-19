@@ -154,3 +154,38 @@ class SchedulingTests(unittest.TestCase):
   class FakeStore:
    db=FakeDB()
   with patch('run.report',return_value={'queued':False}):self.assertEqual(tick(FakeStore())['research_stop'],'storage_soft_limit')
+
+class AutonomousExtractionTests(unittest.TestCase):
+ setUp=Tests.setUp
+ tearDown=Tests.tearDown
+ def fake(self,approved=True,empty=False):
+  def respond(req):
+   body=json.loads(req.data)
+   result={'approved':approved,'reason':'source reviewed'} if 'Audit the proposed' in body['instructions'] else {'findings':[] if empty else [self.finding]}
+   return {'id':'test-response','status':'completed','usage':{'input_tokens':123,'output_tokens':45},'output':[{'content':[{'type':'output_text','text':json.dumps(result)}]}]}
+  return respond
+ def test_review_passes_and_usage_recorded(self):
+  from extract import prepare_domain
+  with patch.dict(os.environ,{'ENRICHMENT_AI_MODEL':'test','OPENAI_API_KEY':'test'}):result=prepare_domain(self.s,'example.com',SCHEMA,self.fake(),review=True)
+  self.assertEqual(result['state'],'approved');self.assertEqual(self.s.db.execute('SELECT count(*) FROM ai_usage').fetchone()[0],2)
+  self.assertEqual(self.s.db.execute('SELECT state FROM proposals').fetchone()[0],'approved')
+ def test_rejected_semantics_cannot_autoapprove(self):
+  from extract import prepare_domain
+  with patch.dict(os.environ,{'ENRICHMENT_AI_MODEL':'test','OPENAI_API_KEY':'test'}):result=prepare_domain(self.s,'example.com',SCHEMA,self.fake(False),review=True)
+  self.assertEqual(result['state'],'pending');self.assertEqual(self.s.db.execute('SELECT status FROM firms').fetchone()[0],'extraction_hold')
+ def test_no_findings_advances_without_crm_write(self):
+  from extract import prepare_domain
+  with patch.dict(os.environ,{'ENRICHMENT_AI_MODEL':'test','OPENAI_API_KEY':'test'}):result=prepare_domain(self.s,'example.com',SCHEMA,self.fake(empty=True),review=True)
+  self.assertEqual(result['state'],'no_criteria');self.assertEqual(self.s.db.execute('SELECT status FROM contacts').fetchone()[0],'no_criteria');self.assertEqual(self.s.db.execute('SELECT count(*) FROM writes').fetchone()[0],0)
+ def test_budget_rejection_is_atomic(self):
+  with self.assertRaises(BudgetExceeded):self.s.reserve_ai(500,5,100,30000)
+  self.assertEqual(self.s.db.execute('SELECT count(*) FROM usage').fetchone()[0],0)
+ def test_daily_budget_does_not_hold_unprocessed_firm(self):
+  from extract import prepare_domain
+  with patch.dict(os.environ,{'ENRICHMENT_AI_MODEL':'test','OPENAI_API_KEY':'test','ENRICHMENT_AI_CALLS_PER_DAY':'1'}):
+   with self.assertRaises(BudgetExceeded):prepare_domain(self.s,'example.com',SCHEMA,self.fake(),review=True)
+  self.assertEqual(self.s.db.execute('SELECT status FROM firms').fetchone()[0],'evidence_ready');self.assertEqual(self.s.db.execute('SELECT state FROM proposals').fetchone()[0],'pending')
+ def test_unresolved_reviews_prevent_completion(self):
+  from run import report
+  self.s.db.execute("UPDATE contacts SET status='review_hold'");self.s.db.execute("UPDATE firms SET status='extraction_hold'");self.s.db.commit()
+  self.assertEqual(report(self.s)['kind'],'weekly')

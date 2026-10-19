@@ -39,6 +39,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY,contact_id TEXT,domain TEXT,payload TEXT,state TEXT DEFAULT 'pending',reason TEXT);
         CREATE TABLE IF NOT EXISTS writes(id TEXT PRIMARY KEY,state TEXT,before_json TEXT,after_json TEXT,at TEXT);
         CREATE TABLE IF NOT EXISTS ai_runs(id TEXT PRIMARY KEY,state TEXT,output TEXT);
+        CREATE TABLE IF NOT EXISTS ai_usage(id TEXT PRIMARY KEY,at TEXT,model TEXT,usage TEXT,response_id TEXT);
         CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,at TEXT,kind TEXT,payload TEXT,state TEXT);
         CREATE INDEX IF NOT EXISTS contacts_domain_status ON contacts(domain,status);
         CREATE INDEX IF NOT EXISTS firms_queue ON firms(status,next_try,attempts);
@@ -47,7 +48,7 @@ class Store:
         '''); self.db.commit()
     def summary(self):
         def c(table,col): return dict(self.db.execute(f'SELECT {col},count(*) FROM {table} GROUP BY {col}').fetchall())
-        return {'contacts':self.db.execute('SELECT count(*) FROM contacts').fetchone()[0], 'contact_status':c('contacts','status'),'firm_status':c('firms','status'),'proposal_status':c('proposals','state'),'write_status':c('writes','state'),'usage':[dict(r) for r in self.db.execute('SELECT * FROM usage')], 'criteria_flags':dict(collections.Counter(type(x).__name__+':'+str(x) for r in self.db.execute('SELECT raw FROM contacts') for x in [json.loads(r[0]).get('coverage',{}).get('In criteria enrichment count')])), 'checkpoint':dict(self.db.execute('SELECT key,value FROM meta'))}
+        return {'contacts':self.db.execute('SELECT count(*) FROM contacts').fetchone()[0], 'contact_status':c('contacts','status'),'firm_status':c('firms','status'),'proposal_status':c('proposals','state'),'write_status':c('writes','state'),'usage':[dict(r) for r in self.db.execute('SELECT * FROM usage')], 'ai_usage': [dict(r) for r in self.db.execute("SELECT model,count(*) calls,sum(CAST(json_extract(usage,'$.input_tokens') AS INTEGER)) input_tokens,sum(CAST(json_extract(usage,'$.output_tokens') AS INTEGER)) output_tokens FROM ai_usage GROUP BY model")], 'criteria_flags':dict(collections.Counter(type(x).__name__+':'+str(x) for r in self.db.execute('SELECT raw FROM contacts') for x in [json.loads(r[0]).get('coverage',{}).get('In criteria enrichment count')])), 'checkpoint':dict(self.db.execute('SELECT key,value FROM meta'))}
     def charge(self,col,amount,limit):
         assert col in {'domains','requests','ai_calls','ai_input_bytes','ai_output_bytes'}
         day=now()[:10]
@@ -56,6 +57,15 @@ class Store:
             used=self.db.execute(f'SELECT {col} FROM usage WHERE day=?',(day,)).fetchone()[0]
             if used+amount>limit: raise BudgetExceeded(col)
             self.db.execute(f'UPDATE usage SET {col}={col}+? WHERE day=?',(amount,day))
+
+    def reserve_ai(self,input_bytes,calls_limit,input_limit,output_limit):
+        # Reserve all dimensions atomically; a rejected budget cannot partially charge.
+        day=now()[:10]
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO usage(day) VALUES (?)',(day,))
+            r=self.db.execute('SELECT * FROM usage WHERE day=?',(day,)).fetchone()
+            if r['ai_calls']+1>calls_limit or r['ai_input_bytes']+input_bytes>input_limit or r['ai_output_bytes']+6000>output_limit:raise BudgetExceeded('AI daily reservation')
+            self.db.execute('UPDATE usage SET ai_calls=ai_calls+1,ai_input_bytes=ai_input_bytes+?,ai_output_bytes=ai_output_bytes+6000 WHERE day=?',(input_bytes,day))
 
 class BudgetExceeded(Exception): pass
 
@@ -166,6 +176,9 @@ def evidence_packet(pages):
 def research(store,limit=10,requests=60,only_domain=None,daily_limit=None):
     from urllib.robotparser import RobotFileParser
     output=[]
+    with store.db:
+        store.db.execute("UPDATE firms SET status='unavailable' WHERE status='retry' AND attempts>=3")
+        store.db.execute("UPDATE contacts SET status='unavailable' WHERE status='pending' AND domain IN (SELECT domain FROM firms WHERE status='unavailable')")
     firms=store.db.execute("SELECT domain FROM firms WHERE EXISTS (SELECT 1 FROM contacts c WHERE c.domain=firms.domain AND c.status='pending') AND status IN ('pending','retry') AND attempts<3 AND next_try<=? ORDER BY (SELECT count(*) FROM contacts c WHERE c.domain=firms.domain) DESC,domain LIMIT ?",(time.time(),limit)).fetchall()
     if only_domain:
         firms=store.db.execute("SELECT domain FROM firms WHERE domain=? AND status IN ('pending','retry') AND attempts<3 AND next_try<=?",(only_domain,time.time())).fetchall()

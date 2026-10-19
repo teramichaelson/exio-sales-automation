@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """One bounded tick; schedule externally only after deployment validation."""
 import argparse,json,os,time
-from worker import Store,CRM,lock,research,apply,digest,now
+from worker import Store,CRM,lock,research,apply,digest,now,BudgetExceeded
 from extract import prepare_domain
 
 def report(store):
     status=store.summary()
-    complete=(not any(status['contact_status'].get(x,0) for x in ('pending','identity_hold')) and not any(status['proposal_status'].get(x,0) for x in ('pending','approved')) and not status['write_status'].get('uncertain_review'))
+    complete=(not any(status['contact_status'].get(x,0) for x in ('pending','identity_hold','review_hold')) and not any(status['proposal_status'].get(x,0) for x in ('pending','approved')) and not any(k!='verified' and v for k,v in status['write_status'].items()) and not any(status['firm_status'].get(k,0) for k in ('pending','retry','evidence_ready','extraction_hold')))
     kind='completion' if complete else 'weekly'
     last=store.db.execute('SELECT at FROM reports WHERE kind=? ORDER BY at DESC LIMIT 1',(kind,)).fetchone()
     import datetime as dt
@@ -26,11 +26,15 @@ def tick(store,do_research=True,do_ai=False,do_write=False):
     if do_ai:
         schema=crm.schema();result['extraction']=[]
         for r in store.db.execute("SELECT domain FROM firms WHERE status='evidence_ready' LIMIT 5").fetchall():
-            try:result['extraction'].append(prepare_domain(store,r['domain'],schema))
-            except Exception as e:result['extraction'].append({'domain':r['domain'],'error':type(e).__name__})
+            try:result['extraction'].append(prepare_domain(store,r['domain'],schema,review=True))
+            except BudgetExceeded:
+                result['extraction_stop']='daily_budget';break
+            except Exception as e:
+                with store.db:store.db.execute("UPDATE firms SET status='extraction_hold' WHERE domain=?",(r['domain'],))
+                result['extraction'].append({'domain':r['domain'],'error':type(e).__name__})
     if do_write:
         result['writes']=[]
-        for r in store.db.execute("SELECT id FROM proposals WHERE state='approved' LIMIT 25").fetchall():
+        for r in store.db.execute("SELECT id FROM proposals p WHERE state='approved' AND NOT EXISTS (SELECT 1 FROM writes w WHERE w.id=p.id) LIMIT 25").fetchall():
             try:result['writes'].append(apply(store,r['id'],crm,execute=True))
             except Exception as e:
                 result['writes'].append({'proposal':r['id'],'error':type(e).__name__});break

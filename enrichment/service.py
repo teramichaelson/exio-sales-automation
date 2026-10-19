@@ -63,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
        s=Store(DB)
        with s.db:s.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('last_job',json.dumps({'state':'running','started_at':now()})))
        enabled=bool(os.environ.get('OPENAI_API_KEY') and os.environ.get('ENRICHMENT_AI_MODEL') and os.environ.get('ENRICHMENT_AI_ENABLED')=='enabled')
-       result=tick(s,do_research=True,do_ai=enabled,do_write=False)
+       result=tick(s,do_research=True,do_ai=enabled,do_write=os.environ.get('ENRICHMENT_WRITES')=='enabled')
        with s.db:s.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('last_job',json.dumps({'state':'finished','finished_at':now(),'ai_enabled':enabled,'result':result})))
        s.db.close()
      except Exception as e:
@@ -91,6 +91,13 @@ class Handler(BaseHTTPRequestHandler):
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);c=crm.contact(body['contact_id']);result={'contact':c}
      try:result['notes']=crm.notes(c)
      except Exception as e:result['notes_error']={'type':type(e).__name__,'message':str(e)[:120]}
+    elif self.path=='/extract':
+     from extract import prepare_domain
+     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);result=prepare_domain(s,body['domain'],crm.schema(),review=True)
+    elif self.path=='/proposals':
+     result=[dict(r) for r in s.db.execute("SELECT id,contact_id,domain,payload,state,reason FROM proposals WHERE state IN ('pending','approved') LIMIT 25")]
+    elif self.path=='/ai-usage':
+     result=[dict(r) for r in s.db.execute('SELECT * FROM ai_usage ORDER BY at DESC LIMIT 20')]
     elif self.path=='/prepare':
      crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']);pid=make_proposal(s,body['contact_id'],body['findings'],crm.schema());result={'proposal_id':pid,'dry_run':apply(s,pid,crm)}
     elif self.path=='/approve':
