@@ -12,7 +12,7 @@ TERMINAL = {'reviewed','unavailable','identity_hold'}
 
 def now(): return dt.datetime.now(dt.timezone.utc).isoformat()
 def schema_hash(schema):
-    canonical=[{'name':f['name'],'type':f.get('type'),'choices':sorted([{'id':c.get('id'),'value':c.get('value')} for c in f.get('choices',[])],key=lambda c:str(c['value']))} for f in schema if f.get('name') in FIELDS.values()]
+    canonical=[{'name':f['name'],'type':f.get('type'),'choices':sorted([{'value':c.get('value')} for c in f.get('choices',[])],key=lambda c:str(c['value']))} for f in schema if f.get('name') in FIELDS.values()]
     return digest(sorted(canonical,key=lambda f:f['name']))
 def digest(v): return hashlib.sha256(json.dumps(v,sort_keys=True,default=str).encode()).hexdigest()
 def domain(v):
