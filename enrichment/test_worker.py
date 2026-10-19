@@ -115,3 +115,20 @@ class MultiSelectTests(unittest.TestCase):
   self.assertTrue(field_matches('B;A',['A','B']))
   self.assertFalse(field_matches(None,['A']))
   self.assertFalse(field_matches('A;C',['A','B']))
+
+class RecoveryTests(unittest.TestCase):
+ setUp=Tests.setUp
+ tearDown=Tests.tearDown
+ proposal=Tests.proposal
+ def test_repair_never_repeats_note(self):
+  pid=self.proposal();crm=FakeCRM();crm.c['custom_field']['cf_preferred_minimum_ebitda']=None
+  crm.saved_notes=[{'description':'[Exio enrichment '+pid+'] source evidence'}]
+  self.s.db.execute('INSERT INTO writes VALUES (?,?,?,?,?)',(pid,'uncertain_review',json.dumps(crm.c),None,now()));self.s.db.commit()
+  with patch.dict(os.environ,{'ENRICHMENT_WRITES':'enabled'}):result=repair_fields(self.s,pid,crm)
+  self.assertEqual(result['state'],'verified');self.assertEqual(len(crm.saved_notes),1);self.assertEqual(crm.calls,1)
+ def test_repair_preserves_newer_value(self):
+  pid=self.proposal();crm=FakeCRM();before=json.dumps(crm.c);crm.c['custom_field']['cf_preferred_minimum_ebitda']='$3M';crm.saved_notes=[{'description':'[Exio enrichment '+pid+'] source'}]
+  self.s.db.execute('INSERT INTO writes VALUES (?,?,?,?,?)',(pid,'uncertain_review',before,None,now()));self.s.db.commit()
+  with patch.dict(os.environ,{'ENRICHMENT_WRITES':'enabled'}):
+   with self.assertRaises(ValueError):repair_fields(self.s,pid,crm)
+  self.assertEqual(crm.calls,0)
