@@ -18,7 +18,9 @@ def report(store):
 def tick(store,do_research=True,do_ai=False,do_write=False):
     result={}
     if do_research:
-        try:result['research']=research(store,limit=10,requests=60)
+        size=store.db.execute('PRAGMA page_count').fetchone()[0]*store.db.execute('PRAGMA page_size').fetchone()[0]
+        if size>400*1024*1024:return {'research_stop':'storage_soft_limit','report':report(store)}
+        try:result['research']=research(store,limit=min(8,int(os.environ.get('ENRICHMENT_BATCH_DOMAINS','8'))),requests=min(1000,int(os.environ.get('ENRICHMENT_REQUESTS_PER_DAY','1000'))),daily_limit=min(200,int(os.environ.get('ENRICHMENT_DOMAINS_PER_DAY','200'))))
         except Exception as e:result['research_stop']=type(e).__name__
     crm=CRM(os.environ['FRESHSALES_BASE_URL'],os.environ['FRESHSALES_API_KEY']) if do_ai or do_write else None
     if do_ai:
