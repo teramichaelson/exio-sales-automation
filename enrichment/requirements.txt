@@ -1,0 +1,2 @@
+# Used only to migrate the historical workbook. Normal worker uses stdlib.
+openpyxl>=3.1,<4
