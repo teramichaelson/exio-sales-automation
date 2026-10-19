@@ -90,3 +90,9 @@ The reporting automation runs Mondays at 8 a.m. America/Los_Angeles, checks Gmai
 Private routes include health/status, one-time checkpoint bootstrap, source collection/evidence, controlled extraction and proposals, usage, prepare/approve/apply and explicit uncertain-write reconciliation. These administrative routes must remain private.
 
 The automated suite currently has 38 tests, including semantic-review rejection, no-criteria queue advancement, actual usage retention, atomic reservations and pause/resume after a daily budget. Runtime activation and account configuration are documented separately.
+
+## Review with a ChatGPT seat
+
+The private `/seat-batch` route returns at most five exact-domain evidence packets, 12,000 characters per firm and 40,000 characters overall. It includes a source hash and truncation flags. A ChatGPT Work run can interpret this cached evidence without calling the external model API. `/seat-schema` supplies only supported field choices. `/seat-review` records a source-hash-checked no-criteria/hold outcome, or validates supported findings, approves and applies them through the existing fill-empty/readback/idempotency controls. Criteria writes still require the writes environment flag. No-criteria outcomes require a declared full review of the supplied source; truncated or ambiguous evidence must be held rather than marked complete. Original records and history are retained.
+
+This mode still consumes the ChatGPT seat's Work/Codex allowance. Small bounded runs, cached source reuse and checkpointed outcomes reduce repeated work, but do not guarantee a specific usage saving or completion time. Keep external model API calls disabled in this mode. The suite has 42 tests.
