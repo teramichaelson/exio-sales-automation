@@ -105,6 +105,6 @@ class ReportTests(unittest.TestCase):
 class SchemaTests(unittest.TestCase):
  def test_schema_hash_ignores_display_metadata(self):
   a=[{'name':'cf_preferred_minimum_ebitda','type':'dropdown','position':1,'choices':[{'id':1,'value':'$5M','position':1}]}]
-  b=[{'name':'cf_preferred_minimum_ebitda','type':'dropdown','position':9,'choices':[{'id':1,'value':'$5M','position':2}]}]
+  b=[{'name':'cf_preferred_minimum_ebitda','type':'dropdown','position':9,'choices':[{'id':9876,'value':'$5M','position':2}]}]
   self.assertEqual(schema_hash(a),schema_hash(b))
   b[0]['choices'][0]['value']='$6M';self.assertNotEqual(schema_hash(a),schema_hash(b))
