@@ -1,0 +1,7 @@
+*.sqlite*
+*.xlsx
+*.csv
+*.json
+!schema.example.json
+__pycache__/
+.env*
